@@ -23,7 +23,7 @@ CLASS_NAME_TO_COLOR = dict(zip(CLASS_NAMES, CLASS_COLORS))
 CLASS_NAME_TO_INDEX = dict(zip(CLASS_NAMES, range(len(CLASS_NAMES))))
 
 # Path extraction
-root_path = "C:\\your_path_to\\scenario1"
+root_path = "C:\\Users\\cecco\\AUVE_1\\scenario1"
 
 scenario = "Town01_type001_subtype0001_scenario00003"  
 
@@ -77,11 +77,12 @@ def get_sensor_T_actor(actor, n_frame):
 def get_point_cloud(n_frame, actor):
 
     frame = frame_list[n_frame] 
+    path = root_path +  '/' + actor + '/lidar01/' + scenario +'/' + frame + '.npz'
     lidar_data = np.load(root_path +  '/' + actor + '/lidar01/' + scenario +'/' + frame + '.npz')['data']
     lidar_T_actor = get_sensor_T_actor(actor, n_frame)
     lidar_data_actor = apply_tf(lidar_T_actor, lidar_data) #in actor frame
  
-    return lidar_data_actor
+    return lidar_data_actor, path
 
 def get_available_point_clouds(n_frame, actors):
     '''
@@ -91,24 +92,24 @@ def get_available_point_clouds(n_frame, actors):
 
     This function is used to get all point clouds available in ego frame
     '''
+    
     ego_to_world = get_actor_T_world(actors[0], n_frame) # the transformation from ego frame to world frame
-    merged_pc = get_point_cloud(n_frame, actors[0]) #in ego frame
-
+    merged_pc = get_point_cloud(n_frame, actors[0]) # in ego frame
+    
     # TODO: retrieve point clouds in actor frame for all actors and merge them into one point cloud in ego frame
+    
     for actor in actors[1:]:
-         
-        # TODO: map `lidar_data_actor` from actor frame to ego frame
-        actors_points = get_point_cloud(n_frame, actor)    # Points in actor frame
-
-        # Traformation matrices
-        actor_to_world = get_actor_T_world(actor, n_frame)
-        world_to_ego = np.linalg.inv(ego_to_world)
-        actor_to_ego =  world_to_ego @ actor_to_world
-
-        actor_point_in_ego = apply_tf(actor_to_ego, actors_points, in_place = False) # Points in ego frame
-
-        merged_pc = np.concatenate((merged_pc,actor_point_in_ego), axis = 0)
         
+        merge = get_point_cloud(n_frame, actor)
+        
+        actor_to_world = get_actor_T_world(actor, n_frame) # retrive transformation matrix from actor to world
+        ego_to_actor =  np.linalg.inv(ego_to_world) @ actor_to_world # 
+        
+        lidar_data_actor = apply_tf(ego_to_actor, merge, in_place = False)
+        
+        # TODO: map `lidar_data_actor` from actor frame to ego frame
+        
+        merged_pc = np.concatenate((merged_pc, lidar_data_actor), axis = 0) # in ego frame
         
     return merged_pc
 
@@ -141,10 +142,13 @@ def get_boxes_in_actor_frame(n_frame, actor): # TODO
     boxes = np.array(boxes).reshape(-1,8) #in sensor frame
 
     # TODO: map `boxes` from sensor frame to actor frame
-
     tf = get_sensor_T_actor(actor, n_frame)
-    apply_tf(tf, boxes, in_place = True) #in actor frame 
-
+    box = apply_tf(tf, boxes, in_place = True)
+    #to_quaternion(tf)
+    #yaw = quaternion_yaw(q)
+    yaw = math.atan2(tf[0,1],tf[0,0])
+    boxes[:,6] = boxes[:,6] - yaw
+    
     return boxes
 
 def get_available_boxes_in_ego_frame(n_frame, actors):
@@ -158,29 +162,23 @@ def get_available_boxes_in_ego_frame(n_frame, actors):
 
     boxes = get_boxes_in_actor_frame(n_frame, actors[0]) #in ego frame
     boxes = np.array(boxes).reshape(-1,8)
-    
     ego_to_world = get_actor_T_world(actors[0], n_frame)
-    available_boxes_in_world_frame = boxes    
+    available_boxes_in_world_frame = boxes
 
     # TODO : retrieve boxes in actor frame for all actors
+    
     for actor in actors[1:]:
-
-        new_boxes = get_boxes_in_actor_frame(n_frame, actor)
-        #new_boxes = np.array(new_boxes).reshape(-1,8)
-
-        # Traformation matrices
+        boxes_ego = get_boxes_in_actor_frame(n_frame, actor) #in ego frame
         actor_to_world = get_actor_T_world(actor, n_frame)
-        world_to_ego = np.linalg.inv(ego_to_world)
-        actor_to_ego =  world_to_ego @ actor_to_world
-
-        apply_tf(actor_to_ego, new_boxes, in_place = True) # Points in ego frame
-
-        yaw = math.atan2(actor_to_ego[0,1],actor_to_ego[0,0])
-
-        new_boxes[:,6] = new_boxes[:,6] - yaw
-
-        boxes = np.concatenate((boxes, new_boxes), axis = 0)
-
+        actor_to_ego = np.linalg.inv(ego_to_world) @ actor_to_world 
+        apply_tf(actor_to_ego, boxes_ego, in_place = True)
+        
+        yaw = math.atan2(actor_to_ego[0,1],actor_to_ego[0,0]) # The boxes from an actor's frame are rotated correctly to align with the ego frame.
+        
+        boxes_ego[:,6] = boxes_ego[:,6]-yaw # The yaw angle for each box is updated to represent its orientation relative to the ego frame.
+        
+        boxes = np.concatenate((boxes, boxes_ego),axis=0)
+        
 
     return boxes
 
@@ -193,15 +191,34 @@ def filter_points(points: np.ndarray, range: np.ndarray):
     This function is used to filter points within the range
     '''
     # TODO: filter points within the range
+    filtered_points = [] 
     
-    filtered_points = [] # this is just a dummy value
-
     for point in points:
         if point[0] > range[0] and point[0] < range[3]:
             if point[1] > range[1] and point[1] < range[4]:
                 if point[2] > range[2] and point[2] < range[5]:
                     filtered_points.append(point) # append points which are within the range
 
-
     return filtered_points
+
+def segment_object_class(irsu_boxes):
+    
+    car_obj = np.empty((0, 7))
+    truck_obj = np.empty((0, 7))
+    ped_obj = np.empty((0, 7))
+    moto_obj = np.empty((0, 7))
+
+    for i in (irsu_boxes):
+        class_label = i[-1]
+        if class_label == 0.0:
+            car_obj = np.vstack((car_obj, i[0:7]))
+        elif class_label == 1.0:
+            truck_obj = np.vstack((truck_obj, i[0:7]))
+        elif class_label == 2.0:
+            moto_obj= np.vstack((moto_obj, i[0:7]))
+        else:
+            ped_obj= np.vstack((ped_obj, i[0:7]))
+            
+            
+    return car_obj, truck_obj, moto_obj, ped_obj
 
