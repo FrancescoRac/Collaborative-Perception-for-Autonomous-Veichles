@@ -7,7 +7,7 @@ All the required data can be downloaded here: https://uncloud.univ-nantes.fr/ind
 
 ### Description
 
-This lab focuses on the utilization of Intelligent Road-Side Unit (IRSU) data, particularly in the context of enhanced vehicle perception and environment mapping. Students will work with LiDAR data and learn how to effectively visualize and interpret this data for autonomous vehicle applications.
+This lab focuses on utilizing Intelligent Road-Side Unit (IRSU) data to enhance vehicle perception and environment mapping. It provides hands-on experience with LiDAR data, helping participants learn how to effectively visualize and interpret it for autonomous vehicle applications.
 
 ## Task 1
 
